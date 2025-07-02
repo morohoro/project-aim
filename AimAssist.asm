@@ -33,9 +33,11 @@
 ; Bone indices: 4=head, 3=chest, 2=pelvis
 
 ; --- Hotkey: Only run if Alt key is pressed (VK_MENU, 0x12, bit 18) ---
-mov VR9, [0x7FFE02E0]
-test VR9, 0x40000      ; 1 << 18
-jz .end
+mov eax, [0x7FFE02E0]
+mov ecx, 0x40000
+and eax, ecx
+sub eax, 0
+je .end
 
 ; --- Time-based randomization for bone targeting ---
 mov VR0, [GameTimeAddress]        ; Read game time or tick counter
@@ -57,29 +59,34 @@ mov VR8, 3
 .bone_selected:
 ; --- Get ClientPlayerManager ---
 mov VR0, [0x0238EB58]
-test VR0, VR0
-jz .end
+mov ecx, 0
+sub VR0, ecx
+je .end
 
 ; --- Get LocalPlayer ---
 mov VR1, [VR0 + 0x13C]
-test VR1, VR1
-jz .end
+mov ecx, 0
+sub VR1, ecx
+je .end
 
 ; --- Get my team ID ---
 mov VR6, [VR1 + 0x1C34]
 
 ; --- Get my soldier ---
 mov VR7, [VR1 + 0x3A8]
-test VR7, VR7
-jz .end
+mov ecx, 0
+sub VR7, ecx
+je .end
 
 ; --- Get my bone position (e.g., head) ---
 mov VR5, [VR7 + 0x490]         ; BoneCollisionComponent
-test VR5, VR5
-jz .end
+mov ecx, 0
+sub VR5, ecx
+je .end
 mov VR5, [VR5 + 0x150]         ; BoneTransforms array
-test VR5, VR5
-jz .end
+mov ecx, 0
+sub VR5, ecx
+je .end
 mov VR9, VR8
 imul VR9, 0x50                 ; sizeof(LinearTransform) = 0x50
 add VR5, VR9
@@ -94,21 +101,23 @@ movss [esp-0x08], xmm0
 
 ; --- Get my current yaw/pitch for FOV calculation ---
 mov VR9, [VR7 + 0xA90]         ; AimAssist
-test VR9, VR9
-jz .end
+mov ecx, 0
+sub VR9, ecx
+je .end
 movss xmm4, [VR9 + 0x0C]       ; my_yaw
 movss [esp-0x60], xmm4
 movss xmm5, [VR9 + 0x18]       ; my_pitch
 movss [esp-0x5C], xmm5
 
 ; --- Get allowed FOV from AimingPoseData ---
-; Pointer chain: Soldier + WeaponComponent + AimingPoseData* (update offsets for your version)
 mov VR4, [VR7 + 0x19A0]        ; WeaponComponent (example offset)
-test VR4, VR4
-jz .end
+mov ecx, 0
+sub VR4, ecx
+je .end
 mov VR4, [VR4 + 0x38]          ; AimingPoseData* (example offset)
-test VR4, VR4
-jz .end
+mov ecx, 0
+sub VR4, ecx
+je .end
 movss xmm3, [VR4 + 0x08]       ; m_targetingFov
 movss [esp-0x50], xmm3
 
@@ -122,8 +131,9 @@ cmp VR5, 64
 jge .no_target
 
 mov VR3, [VR2 + VR5*4]
-test VR3, VR3
-jz .next
+mov ecx, 0
+sub VR3, ecx
+je .next
 
 cmp VR3, VR1
 je .next
@@ -133,12 +143,14 @@ cmp VR7, VR6
 je .next
 
 mov VR7, [VR3 + 0x3A8]
-test VR7, VR7
-jz .next
+mov ecx, 0
+sub VR7, ecx
+je .next
 
 mov VR4, [VR7 + 0x1E0]
-test VR4, VR4
-jz .next
+mov ecx, 0
+sub VR4, ecx
+je .next
 fld dword [VR4 + 0x20]
 fldz
 fcomip st0, st1
@@ -147,11 +159,13 @@ jbe .next
 
 ; --- Get target bone position ---
 mov VR4, [VR7 + 0x490]         ; BoneCollisionComponent
-test VR4, VR4
-jz .next
+mov ecx, 0
+sub VR4, ecx
+je .next
 mov VR4, [VR4 + 0x150]         ; BoneTransforms array
-test VR4, VR4
-jz .next
+mov ecx, 0
+sub VR4, ecx
+je .next
 mov VR9, VR8
 imul VR9, 0x50
 add VR4, VR9
@@ -231,8 +245,9 @@ ja .next                       ; if fov > allowed, skip target
 ; --- Write aim angles ---
 mov VR7, [VR1 + 0x3A8]
 mov VR7, [VR7 + 0xA90]         ; AimAssist
-test VR7, VR7
-jz .end
+mov ecx, 0
+sub VR7, ecx
+je .end
 movss xmm0, [esp-0x40]
 movss [VR7 + 0x0C], xmm0       ; m_yaw
 movss xmm1, [esp-0x48]

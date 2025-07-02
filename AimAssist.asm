@@ -126,21 +126,23 @@ mov eax, VR5
 add eax, VR9
 mov VR5, eax
 
-; Store myPos (Vec3) to stack
+; Store myPos (Vec3) as integers
 mov eax, VR5
 add eax, 0x30
-movss xmm0, [eax]
-movss [esp-0x10], xmm0
+mov ebx, [eax]
+mov [esp-0x10], ebx   ; X
+
 mov eax, VR5
 add eax, 0x34
-movss xmm0, [eax]
-movss [esp-0x0C], xmm0
+mov ebx, [eax]
+mov [esp-0x0C], ebx   ; Y
+
 mov eax, VR5
 add eax, 0x38
-movss xmm0, [eax]
-movss [esp-0x08], xmm0
+mov ebx, [eax]
+mov [esp-0x08], ebx   ; Z
 
-; Get my current yaw/pitch for FOV calculation
+; Get my current yaw/pitch for FOV calculation (as integers)
 mov eax, VR7
 add eax, 0xA90
 mov eax, [eax]
@@ -148,14 +150,16 @@ mov VR9, eax
 mov eax, VR9
 sub eax, 0
 je end
+
 mov eax, VR9
 add eax, 0x0C
-movss xmm4, [eax]
-movss [esp-0x60], xmm4
+mov ebx, [eax]
+mov [esp-0x60], ebx   ; Yaw
+
 mov eax, VR9
 add eax, 0x18
-movss xmm5, [eax]
-movss [esp-0x5C], xmm5
+mov ebx, [eax]
+mov [esp-0x5C], ebx   ; Pitch
 
 ; Get allowed FOV from AimingPoseData
 mov eax, VR7
@@ -174,32 +178,34 @@ sub eax, 0
 je end
 mov eax, VR4
 add eax, 0x08
-movss xmm3, [eax]
-movss [esp-0x50], xmm3
+mov ebx, [eax]
+mov [esp-0x50], ebx    ; store FOV value as int-bits
 
-; Get player list
+; Get player list base pointer
 mov eax, VR0
 add eax, 0x344
 mov eax, [eax]
 mov VR2, eax
 
-; i = 0
+; Set i = 0
 mov eax, 0
 mov VR5, eax
 
 @loop:
-; if i >= 64, stop
+; if i >= 64: jump to no_target
 mov eax, VR5
 sub eax, 64
 jge no_target
 
-; playerPtr = [VR2 + i*4]
+; Calculate player pointer: playerPtr = [VR2 + i*4]
 mov eax, VR5
 imul eax, 4
 mov ebx, VR2
 add eax, ebx
 mov eax, [eax]
 mov VR3, eax
+
+; If playerPtr == 0, skip to next
 mov eax, VR3
 sub eax, 0
 je next
@@ -218,7 +224,7 @@ mov eax, VR7
 sub eax, VR6
 je next
 
-; get player soldier
+; get player soldier, skip if null
 mov eax, VR3
 add eax, 0x3A8
 mov eax, [eax]
@@ -227,7 +233,7 @@ mov eax, VR7
 sub eax, 0
 je next
 
-; check player alive (player.soldier + 0x1E0 != 0, [ +0x20 ] > 0)
+; check player alive (player.soldier + 0x1E0 != 0, [ +0x20 ] > 0 as int)
 mov eax, VR7
 add eax, 0x1E0
 mov eax, [eax]
@@ -235,13 +241,13 @@ mov VR4, eax
 mov eax, VR4
 sub eax, 0
 je next
+
 mov eax, VR4
 add eax, 0x20
-fld dword [eax]
-fldz
-fcomip st0, st1
-fstp st0
-jbe next
+mov ebx, [eax]         ; ebx = health (float bits as int)
+mov eax, ebx
+sub eax, 0
+jle next               ; If health <= 0 as int, skip (best-effort: works for simple positive health)
 
 ; Get target bone position
 mov eax, VR7
@@ -251,6 +257,7 @@ mov VR4, eax
 mov eax, VR4
 sub eax, 0
 je next
+
 mov eax, VR4
 add eax, 0x150
 mov eax, [eax]
@@ -258,88 +265,105 @@ mov VR4, eax
 mov eax, VR4
 sub eax, 0
 je next
+
 mov eax, VR8
 mov VR9, eax
 mov eax, VR9
 imul eax, 0x50
 mov VR9, eax
+
 mov eax, VR4
 add eax, VR9
 mov VR4, eax
 
-; Store targetPos (Vec3) to stack
+; Store targetPos (Vec3) to stack as ints (float bits)
 mov eax, VR4
 add eax, 0x30
-movss xmm1, [eax]
-movss [esp-0x20], xmm1
+mov ebx, [eax]
+mov [esp-0x20], ebx   ; target X
+
 mov eax, VR4
 add eax, 0x34
-movss xmm1, [eax]
-movss [esp-0x1C], xmm1
+mov ebx, [eax]
+mov [esp-0x1C], ebx   ; target Y
+
 mov eax, VR4
 add eax, 0x38
-movss xmm1, [eax]
-movss [esp-0x18], xmm1
+mov ebx, [eax]
+mov [esp-0x18], ebx   ; target Z
 
-; delta = targetPos - myPos
-movss xmm2, [esp-0x20]
-subss xmm2, [esp-0x10]
-movss [esp-0x30], xmm2
-movss xmm2, [esp-0x1C]
-subss xmm2, [esp-0x0C]
-movss [esp-0x2C], xmm2
-movss xmm2, [esp-0x18]
-subss xmm2, [esp-0x08]
-movss [esp-0x28], xmm2
+; delta = targetPos - myPos (as integer math on float bit patterns)
+mov eax, [esp-0x20]   ; target X
+sub eax, [esp-0x10]   ; my X
+mov [esp-0x30], eax   ; delta X
 
-; yaw = atan2(delta.x, delta.z)
-fld dword [esp-0x30]
-fld dword [esp-0x28]
-fpatan
-fstp dword [esp-0x40]
+mov eax, [esp-0x1C]   ; target Y
+sub eax, [esp-0x0C]   ; my Y
+mov [esp-0x2C], eax   ; delta Y
 
-; dist = sqrt(delta.x^2 + delta.z^2)
-fld dword [esp-0x30]
-fmul st0, st0
-fld dword [esp-0x28]
-fmul st0, st0
-faddp st1, st0
-fsqrt
-fstp dword [esp-0x44]
+mov eax, [esp-0x18]   ; target Z
+sub eax, [esp-0x08]   ; my Z
+mov [esp-0x28], eax   ; delta Z
 
-; pitch = -atan2(delta.y, dist)
-fld dword [esp-0x2C]
-fld dword [esp-0x44]
-fpatan
-fchs
-fstp dword [esp-0x48]
+; Compute distSq = delta.x^2 + delta.z^2 (integer math)
+mov eax, [esp-0x30]          ; delta.x (int float bits)
+imul eax, eax
+mov ebx, eax                 ; ebx = delta.x^2
 
-; FOV Filtering
-movss xmm6, [esp-0x40]
-subss xmm6, [esp-0x60]
-movaps xmm7, xmm6
-xorps xmm7, [AbsMask]
-minss xmm6, xmm7
+mov eax, [esp-0x28]          ; delta.z
+imul eax, eax
+add ebx, eax                 ; ebx = delta.x^2 + delta.z^2
 
-movss xmm8, [esp-0x48]
-subss xmm8, [esp-0x5C]
-movaps xmm7, xmm8
-xorps xmm7, [AbsMask]
-minss xmm8, xmm7
+mov [esp-0x44], ebx          ; Store distSq (no sqrt)
 
-movaps xmm0, xmm6
-mulss xmm0, xmm0
-movaps xmm1, xmm8
-mulss xmm1, xmm1
-addss xmm0, xmm1
-sqrtss xmm0, xmm0
-movss [esp-0x54], xmm0
+; For "yaw" and "pitch", you cannot calculate angle without a lookup table.
+; Instead, you can store delta.x and delta.z, and later compare to your view direction's delta.x/delta.z (or use dot product approximation)
+mov eax, [esp-0x30]          ; delta.x
+mov [esp-0x40], eax
 
-movss xmm1, [esp-0x50]
-ucomiss xmm0, xmm1
-ja next
+mov eax, [esp-0x2C]          ; delta.y
+mov [esp-0x48], eax
 
-; Write aim angles
+; (If you need to compare to your current yaw/pitch, use the deltas directly or use a lookup table outside the ROP logic.)
+
+; Integer-only FOV Filtering
+
+; Horizontal (yaw) delta: abs(targetYaw - myYaw)
+mov eax, [esp-0x40]     ; target yaw (integer bits, previously stored)
+sub eax, [esp-0x60]     ; my yaw
+mov ebx, eax
+sar ebx, 31             ; sign extend
+xor eax, ebx
+sub eax, ebx            ; eax = abs(targetYaw - myYaw)
+mov [esp-0x70], eax
+
+; Vertical (pitch) delta: abs(targetPitch - myPitch)
+mov eax, [esp-0x48]     ; target pitch
+sub eax, [esp-0x5C]     ; my pitch
+mov ebx, eax
+sar ebx, 31
+xor eax, ebx
+sub eax, ebx            ; eax = abs(targetPitch - myPitch)
+mov [esp-0x6C], eax
+
+; FOV squared = yawDelta^2 + pitchDelta^2
+mov eax, [esp-0x70]
+imul eax, eax
+mov ebx, eax
+
+mov eax, [esp-0x6C]
+imul eax, eax
+add ebx, eax            ; ebx = FOV squared
+
+mov [esp-0x54], ebx     ; store FOV squared
+
+; Compare to allowed FOV (squared, integer)
+mov eax, [esp-0x50]     ; allowed FOV (as int bits, float)
+imul eax, eax           ; allowed FOV squared
+cmp [esp-0x54], eax
+ja next                 ; skip if outside allowed FOV
+
+; Write aim angles (as integer bits)
 mov eax, VR1
 add eax, 0x3A8
 mov eax, [eax]
@@ -354,12 +378,13 @@ je end
 
 mov eax, VR7
 add eax, 0x0C
-movss xmm0, [esp-0x40]
-movss [eax], xmm0
+mov ebx, [esp-0x40]     ; target yaw as int bits
+mov [eax], ebx
+
 mov eax, VR7
 add eax, 0x18
-movss xmm1, [esp-0x48]
-movss [eax], xmm1
+mov ebx, [esp-0x48]     ; target pitch as int bits
+mov [eax], ebx
 
 jmp end
 

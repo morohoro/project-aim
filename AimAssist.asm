@@ -1,148 +1,229 @@
-; AimAssist.asm (ROP-Compiler compatible)
-; Assumes:
-;   - VR0 = bone index (set by loader/C: 4=head, 3=chest, 2=pelvis)
-;   - All input checks (hotkey, randomization) handled externally
+; X86-assembly for Speedi13 ROP-Compiler - Minimal BF3 Aimbot Loop
 
-; Get ClientPlayerManager
-mov eax, 0x0238EB58
-mov eax, DWORD PTR[eax]
-mov VR1, eax
+;// Compiler settings (matching BF3_MinimapESP.asm)
+;// <cfg=RandomPadding>true</cfg>
+;// <cfg=RandomPaddingSize>128</cfg>
+;// <cfg=SearchDlls>true</cfg>
+;// <cfg=VirtualQuerySearch>false</cfg>
+;// <cfg=PrintDebugOutput>false</cfg>
 
-; Get LocalPlayer
-mov eax, VR1
-add eax, 0x13C
-mov eax, DWORD PTR[eax]
-mov VR2, eax
+; Virtual register usage:
+;// VR0 => GLOBAL_MinimumAddress (e.g., 0x10000, for pointer validation)
+;// VR1 => enemyX
+;// VR2 => myX / localPlayer
+;// VR3 => myY / myTeam
+;// VR4 => myZ / mySoldier
+;// VR5 => enemyY
+;// VR6 => enemyZ
+;// VR7 => playerList base pointer
+;// VR8 => player list iterator
+;// VR9 => bone index (set by C code)
 
-; Get my team ID
-mov eax, VR2
-add eax, 0x1C34
-mov eax, DWORD PTR[eax]
-mov VR3, eax        ; myTeam
+@l_Start:
+    ; Hotkey check: VK_MENU (Alt key, bit 18, 0x40000)
+    mov eax, 0x7FFE02E0
+    mov eax, DWORD PTR[eax]
+    mov VR9, eax           ; Store in VR9 for C code
 
-; Get my soldier
-mov eax, VR2
-add eax, 0x3A8
-mov eax, DWORD PTR[eax]
-mov VR4, eax        ; mySoldier
+    ; Get ClientPlayerManager
+    mov eax, 0x0238EB58
+    mov eax, DWORD PTR[eax]
+    mov ecx, VR0
+    sub eax, ecx
+    jc End
+    xchg eax, ecx
 
-; Get my bone component
-mov eax, VR4
-add eax, 0x490
-mov eax, DWORD PTR[eax]
-mov VR5, eax
+    ; Get LocalPlayer
+    mov ebx, eax
+    add ebx, 0x13C
+    mov ebx, DWORD PTR[ebx]
+    mov ecx, VR0
+    sub ebx, ecx
+    jc End
+    xchg ebx, ecx
+    mov VR2, ebx           ; LocalPlayer
 
-; Get my bone array
-mov eax, VR5
-add eax, 0x150
-mov eax, DWORD PTR[eax]
-mov VR5, eax
+    ; Get my team ID
+    mov eax, VR2
+    add eax, 0x1C34
+    mov eax, DWORD PTR[eax]
+    mov VR3, eax           ; myTeam
 
-; Calculate myBonePtr = boneArray + VR0 * 0x50
-mov eax, VR0           ; bone index (already set)
-; If add eax, 0x50 supported, repeat VR0 times (for small set, unroll or loop)
-add eax, 0x50          ; repeat as needed if possible/gadget exists
+    ; Get my soldier
+    mov eax, VR2
+    add eax, 0x3A8
+    mov eax, DWORD PTR[eax]
+    mov ecx, VR0
+    sub eax, ecx
+    jc End
+    xchg eax, ecx
+    mov VR4, eax           ; mySoldier
 
-add eax, VR5           ; myBonePtr
-mov VR6, eax
+    ; Get my bone component
+    mov eax, VR4
+    add eax, 0x490
+    mov eax, DWORD PTR[eax]
+    mov ecx, VR0
+    sub eax, ecx
+    jc End
+    xchg eax, ecx
 
-; Get my bone position (Vec3)
-mov eax, VR6
-add eax, 0x30
-mov ebx, DWORD PTR[eax]    ; myX
+    ; Get my bone array
+    mov ebx, eax
+    add ebx, 0x150
+    mov ebx, DWORD PTR[ebx]
+    mov ecx, VR0
+    sub ebx, ecx
+    jc End
+    xchg ebx, ecx
 
-mov eax, VR6
-add eax, 0x34
-mov ecx, DWORD PTR[eax]    ; myY
+    ; Calculate myBonePtr = boneArray + VR9 * 0x50
+    mov eax, VR9           ; Bone index from C code
+    mov ecx, 0x50          ; Bone size
+    imul eax, ecx          ; eax = VR9 * 0x50
+    add eax, ebx           ; myBonePtr = boneArray + (boneIndex * boneSize)
 
-mov eax, VR6
-add eax, 0x38
-mov edx, DWORD PTR[eax]    ; myZ
+    ; Get my bone position (Vec3)
+    mov edx, eax
+    add edx, 0x30
+    mov edx, DWORD PTR[edx]  ; myX
+    mov VR2, edx
 
-; Get my yaw/pitch
-mov eax, VR4
-add eax, 0xA90
-mov eax, DWORD PTR[eax]
+    mov edx, eax
+    add edx, 0x34
+    mov edx, DWORD PTR[edx]  ; myY
+    mov VR3, edx
 
-mov esi, eax      ; aimAssist ptr
+    mov edx, eax
+    add edx, 0x38
+    mov edx, DWORD PTR[edx]  ; myZ
+    mov VR4, edx
 
-mov eax, esi
-add eax, 0x0C
-mov ebx, DWORD PTR[eax]    ; myYaw
+    ; Get player list base pointer
+    mov eax, 0x0238EB58
+    mov eax, DWORD PTR[eax]
+    mov ecx, VR0
+    sub eax, ecx
+    jc End
+    xchg eax, ecx
 
-mov eax, esi
-add eax, 0x18
-mov ecx, DWORD PTR[eax]    ; myPitch
+    add eax, 0x344
+    mov eax, DWORD PTR[eax]
+    mov ecx, VR0
+    sub eax, ecx
+    jc End
+    xchg eax, ecx
+    mov VR7, eax           ; playerList base
 
-; Get allowed FOV
-mov eax, VR4
-add eax, 0x19A0
-mov eax, DWORD PTR[eax]
-add eax, 0x38
-mov eax, DWORD PTR[eax]
-add eax, 0x08
-mov edi, DWORD PTR[eax]    ; allowedFov
+    ; Set up player loop (64 players, 4-byte stride)
+    mov VR8, VR7           ; Iterator = playerList
+    mov eax, VR7
+    add eax, 256           ; 64 * 4
+    mov VR10, eax          ; End pointer (use VR10 to avoid VR9 overwrite)
 
-; Get player list base pointer
-mov eax, VR1
-add eax, 0x344
-mov eax, DWORD PTR[eax]
-mov VR7, eax               ; playerList
+@Loop:
+    mov eax, VR8
+    mov ecx, VR10
+    sub eax, ecx
+    je l_Start
+    js l_Start
 
-; Loop over 64 players (pseudo, since ROP-compiler can't do full loops, unroll or do once for demo)
-; (Repeat this block for each i=0..63 in C, or handle externally and pass pointer in VR8)
+    ; Get player pointer
+    mov eax, VR8
+    mov eax, DWORD PTR[eax]
+    mov ecx, VR0
+    sub eax, ecx
+    jc NextPlayer
+    xchg eax, ecx
 
-; Example for first player (player 0)
-mov eax, VR7
-; add eax, i*4 (i=0 for demo, add accordingly in C)
-mov eax, DWORD PTR[eax]    ; playerPtr
+    ; Skip if localPlayer
+    mov ecx, VR2
+    sub eax, ecx
+    je NextPlayer
+    xchg eax, ecx
 
-; Check playerPtr != 0 and not localPlayer
-; (If needed, can check in C before passing pointer)
+    ; Team check
+    mov ebx, eax
+    add ebx, 0x1C34
+    mov ebx, DWORD PTR[ebx]
+    mov ecx, VR3
+    sub ebx, ecx
+    je NextPlayer
+    xchg ebx, ecx
 
-; Team check
-mov ebx, eax
-add ebx, 0x1C34
-mov ebx, DWORD PTR[ebx]
-sub ebx, VR3
-je @next
+    ; Get enemy soldier
+    mov ebx, eax
+    add ebx, 0x3A8
+    mov ebx, DWORD PTR[ebx]
+    mov ecx, VR0
+    sub ebx, ecx
+    jc NextPlayer
+    xchg ebx, ecx
 
-; Get soldier pointer
-mov ebx, eax
-add ebx, 0x3A8
-mov ebx, DWORD PTR[ebx]
+    ; Health check
+    mov ecx, ebx
+    add ecx, 0x1E0
+    mov ecx, DWORD PTR[ecx]
+    mov edx, VR0
+    sub ecx, edx
+    jc NextPlayer
+    xchg ecx, edx
 
-; Alive check omitted for brevity (do in C if possible)
+    mov edx, ecx
+    add edx, 0x20
+    mov edx, DWORD PTR[edx]
+    mov ecx, 0
+    sub edx, ecx
+    jc NextPlayer
+    je NextPlayer
 
-; Get enemy bone
-mov ebx, ebx
-add ebx, 0x490
-mov ebx, DWORD PTR[ebx]
-add ebx, 0x150
-mov ebx, DWORD PTR[ebx]
-add ebx, VR0
-add ebx, 0x50     ; as above, simulate bone index * 0x50
+    ; Get enemy bone component
+    mov ecx, ebx
+    add ecx, 0x490
+    mov ecx, DWORD PTR[ecx]
+    mov edx, VR0
+    sub ecx, edx
+    jc NextPlayer
+    xchg ecx, edx
 
-; Get enemy bone position (Vec3)
-mov eax, ebx
-add eax, 0x30
-mov esi, DWORD PTR[eax]    ; enemyX
+    ; Get enemy bone array
+    mov edx, ecx
+    add edx, 0x150
+    mov edx, DWORD PTR[edx]
+    mov ecx, VR0
+    sub edx, ecx
+    jc NextPlayer
+    xchg edx, ecx
 
-mov eax, ebx
-add eax, 0x34
-mov edi, DWORD PTR[eax]    ; enemyY
+    ; Calculate enemyBonePtr = boneArray + VR9 * 0x50
+    mov eax, VR9           ; Bone index (ensure VR9 is not overwritten by end pointer!)
+    mov ecx, 0x50          ; Bone size
+    imul eax, ecx          ; eax = VR9 * 0x50
+    add eax, edx           ; edx = enemy bone array base
 
-mov eax, ebx
-add eax, 0x38
-mov ebp, DWORD PTR[eax]    ; enemyZ
+    ; Get enemy bone position (Vec3)
+    mov edx, eax
+    add edx, 0x30
+    mov edx, DWORD PTR[edx]  ; enemyX
+    mov VR1, edx
 
-; delta = enemyPos - myPos (integer math)
-sub esi, ebx   ; dx = enemyX - myX
-sub edi, ecx   ; dy = enemyY - myY
+    mov edx, eax
+    add edx, 0x34
+    mov edx, DWORD PTR[edx]  ; enemyY
+    mov VR5, edx
 
-; (FOV filtering and write-back omitted for brevity)
+    mov edx, eax
+    add edx, 0x38
+    mov edx, DWORD PTR[edx]  ; enemyZ
+    mov VR6, edx
 
-@next:
-; End of single iteration (for full implementation, repeat as needed externally or unroll)
+    ; Break after first valid target (for aimbot, you may want to process all players—remove this if so)
+    jmp End
 
-ret
+@NextPlayer:
+    add VR8, 4             ; Next player
+    jmp Loop
+
+@End:
+    nop
+    jmp l_Start            ; Restart the whole logic (continuous loop)

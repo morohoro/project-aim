@@ -1,5 +1,29 @@
-// AimAssist.c - Integer logic version, mirroring ROP-compatible AimAssist.asm
+// AimAssist.c - Refactored for Speedi13 ROP-Compiler integration
+// Implements BF3 aimbot logic with pointer chasing in assembly and FOV/aim logic in C
 
+#include <stdint.h>
+
+// Offsets from original AimAssist.c
+#define OFFSET_CLIENTPLAYERMANAGER   0x0238EB58
+#define OFFSET_LOCALPLAYER           0x13C
+#define OFFSET_PLAYERLIST            0x344
+#define OFFSET_SOLDIER               0x3A8
+#define OFFSET_TEAMID                0x1C34
+#define OFFSET_HEALTHMODULE          0x1E0
+#define OFFSET_HEALTH                0x20
+#define OFFSET_AIMASSIST             0xA90
+#define OFFSET_AIMASSIST_YAW         0x0C
+#define OFFSET_AIMASSIST_PITCH       0x18
+
+
+```c
+// AimAssist.c - Refactored for Speedi13 ROP-Compiler integration
+// Implements BF3 aimbot logic with pointer chasing in assembly and FOV/aim logic in C
+
+#include <stdint.h>
+#include <math.h>
+
+// Offsets from original AimAssist.c
 #define OFFSET_CLIENTPLAYERMANAGER   0x0238EB58
 #define OFFSET_LOCALPLAYER           0x13C
 #define OFFSET_PLAYERLIST            0x344
@@ -21,117 +45,119 @@
 #define BONE_CHEST   3
 #define BONE_PELVIS  2
 
-// Stack emulation (for demonstration)
-int stack[256];
+// ROP-Compiler API (assumed provided by Speedi13 ROP-Compiler)
+extern void ExecuteROPChain(void);
+extern int GetVirtualRegister(int index);
+extern void SetVirtualRegister(int index, int value);
 
-// Helper: Read int at address
-int read_int(unsigned int addr) {
-    return *(int*)(addr);
+// Helper: Read int at address with validation
+static inline int read_int(uint32_t addr) {
+    if (!addr || addr < 0x1000000) return 0; // Basic pointer validation
+    return *(int*)addr;
 }
 
-// Helper: Write int at address
-void write_int(unsigned int addr, int value) {
-    *(int*)(addr) = value;
+// Helper: Read float at address with validation
+static inline float read_float(uint32_t addr) {
+    if (!addr || addr < 0x1000000) return 0.0f;
+    return *(float*)addr;
+}
+
+// Helper: Write float at address with validation
+static inline void write_float(uint32_t addr, float value) {
+    if (addr && addr >= 0x1000000) {
+        *(float*)addr = value;
+    }
 }
 
 // Entry point
-void AimAssistTick() {
-    // Only activate if Alt key is pressed (VK_MENU, 0x12, bit 18)
-    if ((*(int*)0x7FFE02E0 & 0x40000) == 0)
+void AimAssistTick(void) {
+    // Check hotkey (VK_MENU, bit 18, 0x40000) from VR9
+    if ((GetVirtualRegister(9) & 0x40000) == 0) {
         return;
+    }
 
-    // Choose bone index based on "game time" for randomization (you can replace with fixed value if needed)
-    int gameTime = read_int(0x12345678); // Replace 0x12345678 with correct address if needed
+    // Set bone index (dynamic or hardcoded)
+    // Replace 0x12345678 with actual game time address if available
+    int gameTime = read_int(0x12345678); // Placeholder; update with valid address
     int boneIndex = (gameTime & 0x3) == 0 ? BONE_HEAD : ((gameTime & 0x3) == 1 ? BONE_CHEST : BONE_PELVIS);
+    SetVirtualRegister(9, boneIndex); // Set VR9 for assembly (overwrites hotkey state)
+
+    // Set VR0 for pointer validation (minimum address)
+    SetVirtualRegister(0, 0x1000000);
+
+    // Define the stack array for ROP chain
+    DWORD boneOffset = boneIndex * 0x50; // Compute once for both uses
+    DWORD stack[] = {
+        0x7FFE02E0,              // GetAsyncKeyState
+        OFFSET_CLIENTPLAYERMANAGER, // 0x0238EB58 (ClientPlayerManager)
+        OFFSET_CLIENTPLAYERMANAGER + OFFSET_PLAYERLIST, // 0x0238EF9C (ClientPlayerManager + 0x344)
+        boneOffset,              // boneIndex * 0x50 (for myBonePtr)
+        boneOffset,              // boneIndex * 0x50 (for enemyBonePtr)
+        0x0                      // For health check
+    };
+
+    // Execute ROP chain with stack
+    // Assuming ExecuteROPChain accepts a stack parameter; adjust if needed
+    ExecuteROPChain((DWORD)&stack);
+
+    // Get enemy position from virtual registers
+    float enemyX = *(float*)&GetVirtualRegister(1); // VR1
+    float enemyY = *(float*)&GetVirtualRegister(5); // VR5
+    float enemyZ = *(float*)&GetVirtualRegister(6); // VR6
+
+    // Get local player position (stored in VR2, VR3, VR4 after reuse)
+    float myX = *(float*)&GetVirtualRegister(2); // VR2
+    float myY = *(float*)&GetVirtualRegister(3); // VR3
+    float myZ = *(float*)&GetVirtualRegister(4); // VR4
+
+    // Validate enemy position (basic check to avoid crashes)
+    if (enemyX == 0.0f && enemyY == 0.0f && enemyZ == 0.0f) {
+        return; // No valid target found
+    }
 
     // Get ClientPlayerManager
-    unsigned int mgr = read_int(OFFSET_CLIENTPLAYERMANAGER);
+    uint32_t mgr = read_int(OFFSET_CLIENTPLAYERMANAGER);
     if (!mgr) return;
 
     // Get LocalPlayer
-    unsigned int localPlayer = read_int(mgr + OFFSET_LOCALPLAYER);
+    uint32_t localPlayer = read_int(mgr + OFFSET_LOCALPLAYER);
     if (!localPlayer) return;
 
-    // Get my team ID
-    int myTeam = read_int(localPlayer + OFFSET_TEAMID);
-
     // Get my soldier
-    unsigned int mySoldier = read_int(localPlayer + OFFSET_SOLDIER);
+    uint32_t mySoldier = read_int(localPlayer + OFFSET_SOLDIER);
     if (!mySoldier) return;
 
-    // Get my bone position (Vec3 as int-bits)
-    unsigned int boneComp = read_int(mySoldier + OFFSET_BONECOMPONENT);
-    if (!boneComp) return;
-    unsigned int boneArray = read_int(boneComp + OFFSET_BONETRANSFORMS);
-    if (!boneArray) return;
-    unsigned int myBonePtr = boneArray + boneIndex * 0x50;
-    int myX = read_int(myBonePtr + OFFSET_BONEPOS + 0);
-    int myY = read_int(myBonePtr + OFFSET_BONEPOS + 4);
-    int myZ = read_int(myBonePtr + OFFSET_BONEPOS + 8);
-
-    // Get my yaw/pitch as int-bits
-    unsigned int aimAssist = read_int(mySoldier + OFFSET_AIMASSIST);
+    // Get my yaw/pitch (as floats)
+    uint32_t aimAssist = read_int(mySoldier + OFFSET_AIMASSIST);
     if (!aimAssist) return;
-    int myYaw = read_int(aimAssist + OFFSET_AIMASSIST_YAW);
-    int myPitch = read_int(aimAssist + OFFSET_AIMASSIST_PITCH);
+    float myYaw = read_float(aimAssist + OFFSET_AIMASSIST_YAW);
+    float myPitch = read_float(aimAssist + OFFSET_AIMASSIST_PITCH);
 
-    // Get allowed FOV as int-bits
-    unsigned int weaponComponent = read_int(mySoldier + OFFSET_WEAPONCOMPONENT);
+    // Get allowed FOV
+    uint32_t weaponComponent = read_int(mySoldier + OFFSET_WEAPONCOMPONENT);
     if (!weaponComponent) return;
-    unsigned int aimingPoseData = read_int(weaponComponent + OFFSET_AIMINGPOSEDATA);
+    uint32_t aimingPoseData = read_int(weaponComponent + OFFSET_AIMINGPOSEDATA);
     if (!aimingPoseData) return;
-    int allowedFov = read_int(aimingPoseData + OFFSET_AIMFOV);
+    float allowedFov = read_float(aimingPoseData + OFFSET_AIMFOV);
 
-    // Get player list base pointer
-    unsigned int playerList = read_int(mgr + OFFSET_PLAYERLIST);
+    // Calculate delta (vector to target)
+    float dx = enemyX - myX;
+    float dy = enemyY - myY;
+    float dz = enemyZ - myZ;
 
-    // Loop over players (max 64)
-    for (int i = 0; i < 64; ++i) {
-        unsigned int playerPtr = read_int(playerList + i * 4);
-        if (!playerPtr) continue;
-        if (playerPtr == localPlayer) continue;
+    // Calculate yaw and pitch angles (basic atan2 approximation)
+    float yaw = atan2f(dy, dx);
+    float distance = sqrtf(dx * dx + dy * dy + dz * dz);
+    float pitch = -atan2f(dz, distance);
 
-        // Team check
-        int teamId = read_int(playerPtr + OFFSET_TEAMID);
-        if (teamId == myTeam) continue;
-
-        // Soldier pointer and alive check
-        unsigned int soldier = read_int(playerPtr + OFFSET_SOLDIER);
-        if (!soldier) continue;
-        unsigned int healthModule = read_int(soldier + OFFSET_HEALTHMODULE);
-        if (!healthModule) continue;
-        int health = read_int(healthModule + OFFSET_HEALTH);
-        if (health <= 0) continue;
-
-        // Get enemy bone position (Vec3 as int-bits)
-        unsigned int enemyBoneComp = read_int(soldier + OFFSET_BONECOMPONENT);
-        if (!enemyBoneComp) continue;
-        unsigned int enemyBoneArray = read_int(enemyBoneComp + OFFSET_BONETRANSFORMS);
-        if (!enemyBoneArray) continue;
-        unsigned int enemyBonePtr = enemyBoneArray + boneIndex * 0x50;
-        int enemyX = read_int(enemyBonePtr + OFFSET_BONEPOS + 0);
-        int enemyY = read_int(enemyBonePtr + OFFSET_BONEPOS + 4);
-        int enemyZ = read_int(enemyBonePtr + OFFSET_BONEPOS + 8);
-
-        // delta = targetPos - myPos (integer math on float bit patterns)
-        int dx = enemyX - myX;
-        int dy = enemyY - myY;
-        int dz = enemyZ - myZ;
-
-        // FOV filtering (integer math, compare deltas directly)
-        int yawDelta = dx - myYaw;
-        int pitchDelta = dy - myPitch;
-        int fovSq = yawDelta * yawDelta + pitchDelta * pitchDelta;
-        int allowedFovSq = allowedFov * allowedFov;
-        if (fovSq > allowedFovSq) continue;
-
-        // Write aim angles (as int-bits)
-        unsigned int mySoldier2 = read_int(localPlayer + OFFSET_SOLDIER);
-        if (!mySoldier2) return;
-        unsigned int aimAssist2 = read_int(mySoldier2 + OFFSET_AIMASSIST);
-        if (!aimAssist2) return;
-        write_int(aimAssist2 + OFFSET_AIMASSIST_YAW, dx);
-        write_int(aimAssist2 + OFFSET_AIMASSIST_PITCH, dy);
-        return; // Stop after first valid target for simplicity
+    // FOV check
+    float yawDelta = fabsf(yaw - myYaw);
+    float pitchDelta = fabsf(pitch - myPitch);
+    if (yawDelta > allowedFov || pitchDelta > allowedFov) {
+        return; // Target outside FOV
     }
+
+    // Write aim angles
+    write_float(aimAssist + OFFSET_AIMASSIST_YAW, yaw);
+    write_float(aimAssist + OFFSET_AIMASSIST_PITCH, pitch);
 }
